@@ -54,6 +54,94 @@ func request(t *testing.T, c *http.Client, method, url string, body any, want in
 func studentInput(id string) Input {
 	return Input{Content: "高端医疗设备需要自主可控", Category: "医疗", Nickname: "同学", ClientID: id, SubmissionID: "first"}
 }
+
+func TestStudentFrameOrigins(t *testing.T) {
+	for _, tc := range []struct {
+		raw, want string
+	}{
+		{"", "'self'"},
+		{" \t\n", "'self'"},
+		{"http://118.89.94.132:18082", "'self' http://118.89.94.132:18082"},
+		{"https://learn.example/ https://learn.example http://localhost:8766", "'self' https://learn.example http://localhost:8766"},
+		{"http://[::1]:8766", "'self' http://[::1]:8766"},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			got, err := studentFrameAncestors(tc.raw)
+			if err != nil || got != tc.want {
+				t.Fatalf("got %q, %v; want %q", got, err, tc.want)
+			}
+		})
+	}
+	for _, raw := range []string{
+		"*", "'self'", "https://*.example", "ftp://learn.example", "https://",
+		"https://learn.example/lesson", "https://learn.example?lesson=1", "https://learn.example#lesson",
+		"https://learn.example?", "https://learn.example#", "https://user:pass@learn.example",
+		"https://learn.example;", "https://learn.example default-src *", "http://localhost:0",
+		"http://localhost:65536", "http://localhost:abc",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			if got, err := studentFrameAncestors(raw); err == nil {
+				t.Fatalf("accepted invalid origin %q as %q", raw, got)
+			}
+		})
+	}
+}
+
+func TestStudentEmbeddingAndSubmission(t *testing.T) {
+	a, err := newApp(filepath.Join(t.TempDir(), "classroom.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { a.db.Close() })
+	for _, origin := range []string{"", "https://learn.example"} {
+		a.studentFrameAncestors, err = studentFrameAncestors(origin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h := a.routes()
+		for _, method := range []string{"GET", "HEAD"} {
+			for _, path := range []string{"/join", "/join?activity=3", "/", "/screen", "/teacher", "/teacher/", "/api/health"} {
+				r := httptest.NewRequest(method, "http://classroom.example"+path, nil)
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, r)
+				wantCSP, wantFrame := "frame-ancestors 'none'", "DENY"
+				if r.URL.Path == "/join" {
+					wantCSP = "frame-ancestors " + a.studentFrameAncestors
+					wantFrame = "SAMEORIGIN"
+					if origin != "" {
+						wantFrame = ""
+					}
+					if w.Code != http.StatusOK {
+						t.Fatalf("%s %s: status %d", method, path, w.Code)
+					}
+				}
+				if got := w.Header().Get("Content-Security-Policy"); got != wantCSP {
+					t.Errorf("%s %s: CSP = %q, want %q", method, path, got, wantCSP)
+				}
+				if got := w.Header().Get("X-Frame-Options"); got != wantFrame {
+					t.Errorf("%s %s: X-Frame-Options = %q, want %q", method, path, got, wantFrame)
+				}
+			}
+		}
+	}
+	// Scripts in the iframe still post from the classroom origin, not its parent.
+	h := a.routes()
+	for i, origin := range []string{"http://classroom.example", "https://learn.example"} {
+		raw, _ := json.Marshal(studentInput(fmt.Sprintf("framed-student-%d", i)))
+		r := httptest.NewRequest("POST", "http://classroom.example/api/messages", bytes.NewReader(raw))
+		r.Header.Set("Origin", origin)
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		want := http.StatusCreated
+		if i == 1 {
+			want = http.StatusForbidden
+		}
+		if w.Code != want {
+			t.Errorf("submission from %s: status %d, want %d: %s", origin, w.Code, want, w.Body.String())
+		}
+	}
+}
 func snapshot(t *testing.T, c *http.Client, url string) Snapshot {
 	t.Helper()
 	var s Snapshot

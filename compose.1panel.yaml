@@ -8,6 +8,8 @@ services:
     environment:
       PORT: "18080"
       DATA_FILE: /data/classroom.db
+      # 允许在线学习单嵌入学生页；其他学习单来源可用空格分隔追加。
+      STUDENT_FRAME_ORIGINS: "https://learn.alumos.cn"
     volumes:
       - classroom-data:/data
     restart: unless-stopped

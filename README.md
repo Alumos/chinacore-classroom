@@ -29,6 +29,8 @@ docker compose up -d
 | 教师工作台 | `http://服务器IP:18080/teacher` |
 | 健康检查 | `http://服务器IP:18080/api/health` |
 
+学生入口 `/join` 支持在线学习单 iframe 嵌入，默认仅允许同源学习单。学习单若部署在其他端口或域名，可通过环境变量 `STUDENT_FRAME_ORIGINS` 配置允许的 HTTP(S) 来源（多个地址用空格分隔，不含路径）。教师后台和班级大屏仍禁止嵌入。详见 [学习单嵌入配置](DEPLOY-1PANEL.md#在线学习单嵌入)。
+
 数据库位于命名卷 `classroom-data` 的 `/data/classroom.db`，重启和重建容器后保留。不要使用 `docker compose down -v` 做日常更新。
 
 ## GitHub Actions

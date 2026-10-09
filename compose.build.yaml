@@ -11,6 +11,7 @@ services:
     environment:
       PORT: "18080"
       DATA_FILE: /data/classroom.db
+      STUDENT_FRAME_ORIGINS: "${STUDENT_FRAME_ORIGINS:-}"
     volumes:
       - classroom-data:/data
     restart: unless-stopped

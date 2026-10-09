@@ -74,12 +74,13 @@ type limiter struct {
 	count int
 }
 type App struct {
-	db       *bolt.DB
-	mu       sync.Mutex // Serializes commits, snapshots and event subscription to avoid lost updates.
-	settings Settings
-	subs     map[*subscription]bool
-	limits   map[string]limiter
-	joinURLs []string
+	db                    *bolt.DB
+	mu                    sync.Mutex // Serializes commits, snapshots and event subscription to avoid lost updates.
+	settings              Settings
+	subs                  map[*subscription]bool
+	limits                map[string]limiter
+	joinURLs              []string
+	studentFrameAncestors string
 }
 
 func idKey(id uint64) []byte { b := make([]byte, 8); binary.BigEndian.PutUint64(b, id); return b }
@@ -646,7 +647,19 @@ func (a *App) routes() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "same-origin")
-		w.Header().Set("X-Frame-Options", "DENY")
+		if r.URL.Path == "/join" {
+			ancestors := a.studentFrameAncestors
+			if ancestors == "" {
+				ancestors = "'self'"
+			}
+			w.Header().Set("Content-Security-Policy", "frame-ancestors "+ancestors)
+			if ancestors == "'self'" {
+				w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+			}
+		} else {
+			w.Header().Set("X-Frame-Options", "DENY")
+			w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+		}
 		w.Header().Set("Cache-Control", "no-store")
 		if r.Method != "GET" && r.Method != "HEAD" {
 			if origin := r.Header.Get("Origin"); origin != "" {
@@ -659,6 +672,33 @@ func (a *App) routes() http.Handler {
 		}
 		mux.ServeHTTP(w, r)
 	})
+}
+
+// Learning sheets may embed the student page. Accept exact HTTP(S) origins,
+// not paths, wildcards or arbitrary CSP directives.
+func studentFrameAncestors(raw string) (string, error) {
+	ancestors := []string{"'self'"}
+	seen := map[string]bool{}
+	for _, origin := range strings.Fields(raw) {
+		u, err := url.Parse(origin)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil ||
+			(u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" ||
+			strings.ContainsAny(u.Host, "*;'\"\\") || strings.ContainsAny(origin, "?#") {
+			return "", fmt.Errorf("STUDENT_FRAME_ORIGINS 必须是完整的 HTTP(S) 来源地址（协议、主机和可选端口），不能包含路径或通配符：%q", origin)
+		}
+		if port := u.Port(); port != "" {
+			n, err := strconv.Atoi(port)
+			if err != nil || n < 1 || n > 65535 {
+				return "", fmt.Errorf("STUDENT_FRAME_ORIGINS 端口无效：%q", origin)
+			}
+		}
+		origin = u.Scheme + "://" + u.Host
+		if !seen[origin] {
+			ancestors = append(ancestors, origin)
+			seen[origin] = true
+		}
+	}
+	return strings.Join(ancestors, " "), nil
 }
 func localURLs(port string) []string {
 	urls := []string{}
@@ -704,6 +744,10 @@ func main() {
 		}
 		return
 	}
+	frameAncestors, err := studentFrameAncestors(os.Getenv("STUDENT_FRAME_ORIGINS"))
+	if err != nil {
+		log.Fatal(err)
+	}
 	file := os.Getenv("DATA_FILE")
 	if file == "" {
 		file = "data/classroom.db"
@@ -713,6 +757,7 @@ func main() {
 		log.Fatal(err)
 	}
 	defer a.db.Close()
+	a.studentFrameAncestors = frameAncestors
 	a.joinURLs = localURLs(port)
 	fmt.Printf("\n  中国芯 · 强国梦 课堂互动平台\n\n  大屏：http://localhost:%s/screen\n  教师：http://localhost:%s/teacher\n  学生：http://localhost:%s/join\n\n", port, port, port)
 	for _, u := range a.joinURLs {
