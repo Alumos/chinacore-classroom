@@ -1,0 +1,12 @@
+node_modules/
+web/dist/
+data/
+release/
+*.exe
+*.log
+.env
+artifacts/
+*.tsbuildinfo
+*.tar
+*.tar.gz
+*.zip

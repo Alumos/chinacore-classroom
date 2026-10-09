@@ -1,0 +1,35 @@
+name: chinacore-classroom
+
+services:
+  classroom:
+    image: chinacore-classroom:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${BIND_ADDRESS:-0.0.0.0}:${HOST_PORT:-18080}:18080"
+    environment:
+      PORT: "18080"
+      DATA_FILE: /data/classroom.db
+    volumes:
+      - classroom-data:/data
+    restart: unless-stopped
+    stop_grace_period: 15s
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/app/chinacore-classroom", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  classroom-data:
