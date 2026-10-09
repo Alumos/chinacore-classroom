@@ -1,0 +1,88 @@
+name: Publish public learning sheet image
+
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/learning-sheet.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: learning-sheet-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  container:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: Alumos/chinacore-learning-sheet
+          ref: main
+      - name: Check JavaScript syntax and static assets
+        run: |
+          node --check site/app.js
+          node --check site/config.js
+          python3 scripts/check-assets.py
+      - uses: docker/setup-buildx-action@v3
+      - name: Resolve image name
+        id: image
+        run: echo "name=ghcr.io/alumos/chinacore-classroom" >> "$GITHUB_OUTPUT"
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=raw,value=learning-sheet-latest
+            type=sha,prefix=learning-sheet-sha-
+      - name: Build test image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: learning-sheet:test
+          cache-from: type=gha
+      - name: Verify Docker configuration and bundled Beidou
+        run: |
+          docker run -d --name learning-sheet-smoke -p 127.0.0.1:18082:80 \
+            -e CLASSROOM_URL=https://classroom.test/join \
+            -e SEARCH_URL=https://rail.test/ learning-sheet:test
+          trap 'docker logs learning-sheet-smoke; docker rm -f learning-sheet-smoke' EXIT
+          for attempt in {1..20}; do
+            if curl -fsS http://127.0.0.1:18082/healthz; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18082/healthz
+          curl -fsS http://127.0.0.1:18082/ | grep -q '苏ICP备2021038338号-1'
+          curl -fsS http://127.0.0.1:18082/config.js > /tmp/config.js
+          grep -q 'https://classroom.test/join' /tmp/config.js
+          grep -q 'https://rail.test/' /tmp/config.js
+          if grep -q '\${' /tmp/config.js; then exit 1; fi
+          curl -fsS http://127.0.0.1:18082/beidou/ > /dev/null
+          curl -fsS http://127.0.0.1:18082/beidou/assets/earth-sphere.png > /dev/null
+          curl -fsS http://127.0.0.1:18082/beidou/game.js > /dev/null
+      - name: Publish verified image
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
