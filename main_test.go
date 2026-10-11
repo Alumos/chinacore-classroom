@@ -430,3 +430,130 @@ func TestHealthcheck(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestNumberedClassroomIsolation(t *testing.T) {
+	a, s, c := testApp(t)
+	a.joinURLs = []string{"http://192.168.1.2:18080/join"}
+	// Keep both public streams open: each must see only its own first message.
+	var readers []*bufio.Scanner
+	for _, suffix := range []string{"", "?room=2"} {
+		res, err := c.Get(s.URL + "/api/events" + suffix)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		reader := bufio.NewScanner(res.Body)
+		readEvent(t, reader, "snapshot")
+		readers = append(readers, reader)
+	}
+	in := studentInput("same-device")
+	request(t, c, "POST", s.URL+"/api/messages", in, 201)
+	in.Content = "课堂二的想法"
+	request(t, c, "POST", s.URL+"/api/messages?room=2", in, 201)
+	for i, reader := range readers {
+		var m Message
+		json.Unmarshal(readEvent(t, reader, "message"), &m)
+		expected := "高端医疗设备需要自主可控"
+		if i == 1 {
+			expected = in.Content
+		}
+		if m.Content != expected {
+			t.Fatalf("room %d received %q", i+1, m.Content)
+		}
+		readEvent(t, reader, "stats")
+	}
+	second := snapshot(t, c, s.URL+"/api/state?room=2")
+	if second.Stats.Participants != 1 || second.Stats.Total != 1 || second.JoinURLs[0] != "http://192.168.1.2:18080/join2" {
+		t.Fatalf("room 2: %+v", second)
+	}
+	request(t, c, "POST", s.URL+"/api/messages?room=2", in, 200) // room-local dedup
+	request(t, c, "PATCH", s.URL+"/api/admin/settings?room=2", map[string]any{"moderation": true, "roomName": "二班"}, 200)
+	pending := studentInput("another-device")
+	request(t, c, "POST", s.URL+"/api/messages?room=2", pending, 201)
+	if got := snapshot(t, c, s.URL+"/api/admin/state?room=2"); got.Stats.Pending != 1 {
+		t.Fatalf("missing pending: %+v", got)
+	}
+	request(t, c, "PATCH", s.URL+"/api/admin/messages/1?room=2", Input{Content: "二班修改", Category: "芯片", Status: "approved"}, 200)
+	first := snapshot(t, c, s.URL+"/api/state")
+	if first.Settings.Moderation || first.Messages[0].Content != "高端医疗设备需要自主可控" {
+		t.Fatalf("first room changed: %+v", first)
+	}
+	request(t, c, "PATCH", s.URL+"/api/admin/settings?room=2", map[string]string{"mode": "finale"}, 200)
+	request(t, c, "POST", s.URL+"/api/messages?room=2", studentInput("paused-device"), 409)
+	request(t, c, "POST", s.URL+"/api/messages", studentInput("third-device"), 201)
+	exported := snapshot(t, c, s.URL+"/api/admin/export?room=2")
+	if exported.Stats.Total != 2 || exported.Settings.RoomName != "二班" {
+		t.Fatalf("wrong export: %+v", exported)
+	}
+	request(t, c, "DELETE", s.URL+"/api/admin/messages/1?room=2", nil, 200)
+	request(t, c, "DELETE", s.URL+"/api/admin/messages?room=2", nil, 200)
+	if got := snapshot(t, c, s.URL+"/api/state?room=2"); got.Stats.Total != 0 || got.Stats.Participants != 0 {
+		t.Fatalf("room 2 not cleared: %+v", got)
+	}
+	if got := snapshot(t, c, s.URL+"/api/state"); got.Stats.Total != 2 || got.Stats.Participants != 2 || got.Settings.Paused {
+		t.Fatalf("room 1 affected: %+v", got)
+	}
+	// The first stream must have no settings/edit/delete/clear events from room 2.
+	readEvent(t, readers[0], "message")
+	readEvent(t, readers[0], "stats")
+	request(t, c, "POST", s.URL+"/api/admin/messages", Input{Content: "一班继续", Category: "芯片"}, 201)
+	readEvent(t, readers[0], "message")
+}
+
+func TestNumberedClassroomPersistence(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "classroom.db")
+	a, err := newApp(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := a.routes()
+	for _, room := range []string{"1", "2"} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("POST", "/api/messages?room="+room, strings.NewReader(`{"content":"课堂`+room+`","category":"芯片","clientId":"same","submissionId":"same"}`)))
+		if w.Code != 201 {
+			t.Fatal(w.Body.String())
+		}
+	}
+	a.db.Close()
+	reopened, err := newApp(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.db.Close()
+	h = reopened.routes()
+	for _, room := range []string{"1", "2"} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("GET", "/api/state?room="+room, nil))
+		var state Snapshot
+		if err := json.Unmarshal(w.Body.Bytes(), &state); err != nil {
+			t.Fatal(err)
+		}
+		if len(state.Messages) != 1 || state.Messages[0].Content != "课堂"+room {
+			t.Fatalf("room %s: %+v", room, state)
+		}
+	}
+}
+
+func TestNumberedPageRoutes(t *testing.T) {
+	a, s, c := testApp(t)
+	a.studentFrameAncestors = "'self' https://learn.example"
+	for _, path := range []string{"/join2", "/screen2", "/teacher2", "/join1", "/screen999", "/join2/"} {
+		res, err := c.Get(s.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != 200 {
+			t.Fatalf("%s: %d", path, res.StatusCode)
+		}
+		if strings.HasPrefix(path, "/join") && res.Header.Get("Content-Security-Policy") != "frame-ancestors "+a.studentFrameAncestors {
+			t.Fatalf("wrong embedding policy for %s", path)
+		}
+	}
+	for _, query := range []string{"room=0", "room=02", "room=-1", "room=1000", "room=", "room=2&room=1"} {
+		request(t, c, "POST", s.URL+"/api/messages?"+query, studentInput("invalid"), 400)
+	}
+	if got := snapshot(t, c, s.URL+"/api/state"); got.Stats.Total != 0 {
+		t.Fatal("invalid room wrote to default room")
+	}
+}

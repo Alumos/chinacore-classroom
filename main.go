@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -75,6 +76,8 @@ type limiter struct {
 }
 type App struct {
 	db                    *bolt.DB
+	roomID                string
+	roomsMu               sync.Mutex
 	mu                    sync.Mutex // Serializes commits, snapshots and event subscription to avoid lost updates.
 	settings              Settings
 	subs                  map[*subscription]bool
@@ -92,40 +95,101 @@ func newApp(file string) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	a := &App{db: db, subs: map[*subscription]bool{}, limits: map[string]limiter{}}
-	err = db.Update(func(tx *bolt.Tx) error {
-		for _, name := range []string{"messages", "settings", "submissions"} {
-			if _, e := tx.CreateBucketIfNotExists([]byte(name)); e != nil {
-				return e
-			}
-		}
-		b := tx.Bucket([]byte("settings"))
-		raw := b.Get([]byte("current"))
-		if raw != nil {
-			return json.Unmarshal(raw, &a.settings)
-		}
-		a.settings = Settings{RoomName: "未来科技课堂", Mode: "live"}
-		return saveSettings(tx, a.settings)
-	})
+	a, err := newRoom(db, "1")
 	if err != nil {
 		db.Close()
 		return nil, err
 	}
 	return a, nil
 }
-func saveSettings(tx *bolt.Tx, s Settings) error {
-	b, e := json.Marshal(s)
-	if e != nil {
-		return e
+
+// Classroom 1 retains the original buckets, so existing records need no migration.
+func (a *App) bucketName(name string) []byte {
+	if a.roomID == "1" {
+		return []byte(name)
 	}
-	return tx.Bucket([]byte("settings")).Put([]byte("current"), b)
+	return []byte("room:" + a.roomID + ":" + name)
+}
+func newRoom(db *bolt.DB, id string) (*App, error) {
+	a := &App{db: db, roomID: id, joinURLs: []string{}, subs: map[*subscription]bool{}, limits: map[string]limiter{}}
+	err := db.Update(func(tx *bolt.Tx) error {
+		for _, name := range []string{"messages", "settings", "submissions"} {
+			if _, err := tx.CreateBucketIfNotExists(a.bucketName(name)); err != nil {
+				return err
+			}
+		}
+		raw := tx.Bucket(a.bucketName("settings")).Get([]byte("current"))
+		if raw != nil {
+			return json.Unmarshal(raw, &a.settings)
+		}
+		name := "未来科技课堂"
+		if id != "1" {
+			name = "未来科技课堂 " + id
+		}
+		a.settings = Settings{RoomName: name, Mode: "live"}
+		return a.saveSettings(tx, a.settings)
+	})
+	return a, err
+}
+func (a *App) saveSettings(tx *bolt.Tx, s Settings) error {
+	b, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	return tx.Bucket(a.bucketName("settings")).Put([]byte("current"), b)
+}
+
+var classroomPage = regexp.MustCompile(`^/(screen|join|teacher)([1-9][0-9]{0,2})?/?$`)
+var classroomID = regexp.MustCompile(`^[1-9][0-9]{0,2}$`)
+
+// Resolve once per API request; each room owns its settings, event subscribers and limits.
+func (a *App) routes() http.Handler {
+	defaultHandler := a.roomRoutes()
+	handlers := map[string]http.Handler{"1": defaultHandler}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/api/health" {
+			defaultHandler.ServeHTTP(w, r)
+			return
+		}
+		ids, present := r.URL.Query()["room"]
+		id := "1"
+		if present {
+			if len(ids) != 1 || !classroomID.MatchString(ids[0]) {
+				fail(w, 400, "课堂编号应为 1～999")
+				return
+			}
+			id = ids[0]
+		}
+		a.roomsMu.Lock()
+		handler := handlers[id]
+		if handler == nil {
+			room, err := newRoom(a.db, id)
+			if err != nil {
+				a.roomsMu.Unlock()
+				fail(w, 500, "读取课堂失败")
+				return
+			}
+			room.studentFrameAncestors = a.studentFrameAncestors
+			for _, raw := range a.joinURLs {
+				u, err := url.Parse(raw)
+				if err == nil {
+					u.Path = "/join" + id
+					room.joinURLs = append(room.joinURLs, u.String())
+				}
+			}
+			handler = room.roomRoutes()
+			handlers[id] = handler
+		}
+		a.roomsMu.Unlock()
+		handler.ServeHTTP(w, r)
+	})
 }
 func publicMessage(m Message) Message { m.ClientID = ""; return m }
 func (a *App) snapshotLocked(admin bool) (Snapshot, error) {
 	s := Snapshot{Settings: a.settings, Messages: []Message{}, Stats: Stats{Categories: map[string]int{}}, JoinURLs: a.joinURLs}
 	participants := map[string]bool{}
 	err := a.db.View(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte("messages")).ForEach(func(_, v []byte) error {
+		return tx.Bucket(a.bucketName("messages")).ForEach(func(_, v []byte) error {
 			var m Message
 			if e := json.Unmarshal(v, &m); e != nil {
 				return e
@@ -304,11 +368,11 @@ func (a *App) createMessage(w http.ResponseWriter, r *http.Request, admin bool) 
 	var duplicate bool
 	if !admin {
 		err := a.db.View(func(tx *bolt.Tx) error {
-			key := tx.Bucket([]byte("submissions")).Get(dedupKey)
+			key := tx.Bucket(a.bucketName("submissions")).Get(dedupKey)
 			if key == nil {
 				return nil
 			}
-			raw := tx.Bucket([]byte("messages")).Get(key)
+			raw := tx.Bucket(a.bucketName("messages")).Get(key)
 			// A teacher may have deleted the message after the browser timed out.
 			// Treat the stale idempotency pointer as unused so the student can retry.
 			if raw == nil {
@@ -343,7 +407,7 @@ func (a *App) createMessage(w http.ResponseWriter, r *http.Request, admin bool) 
 	}
 	m := Message{Content: in.Content, Category: in.Category, Nickname: in.Nickname, Status: status, CreatedAt: time.Now().UnixMilli(), ClientID: in.ClientID}
 	err := a.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("messages"))
+		b := tx.Bucket(a.bucketName("messages"))
 		if b.Stats().KeyN >= 10000 {
 			return errors.New("capacity")
 		}
@@ -360,7 +424,7 @@ func (a *App) createMessage(w http.ResponseWriter, r *http.Request, admin bool) 
 			return e
 		}
 		if !admin {
-			return tx.Bucket([]byte("submissions")).Put(dedupKey, idKey(id))
+			return tx.Bucket(a.bucketName("submissions")).Put(dedupKey, idKey(id))
 		}
 		return nil
 	})
@@ -401,7 +465,7 @@ func (a *App) updateMessage(w http.ResponseWriter, r *http.Request) {
 	var m Message
 	oldStatus := ""
 	err := a.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("messages"))
+		b := tx.Bucket(a.bucketName("messages"))
 		raw := b.Get(idKey(id))
 		if raw == nil {
 			return os.ErrNotExist
@@ -448,16 +512,16 @@ func (a *App) clearMessages(w http.ResponseWriter, r *http.Request) {
 	err := a.db.Update(func(tx *bolt.Tx) error {
 		// Preserve the message sequence so in-flight browser events and old local
 		// histories cannot confuse new comments with deleted ones after a reset.
-		sequence := tx.Bucket([]byte("messages")).Sequence()
+		sequence := tx.Bucket(a.bucketName("messages")).Sequence()
 		for _, name := range []string{"messages", "submissions"} {
-			if err := tx.DeleteBucket([]byte(name)); err != nil {
+			if err := tx.DeleteBucket(a.bucketName(name)); err != nil {
 				return err
 			}
-			if _, err := tx.CreateBucket([]byte(name)); err != nil {
+			if _, err := tx.CreateBucket(a.bucketName(name)); err != nil {
 				return err
 			}
 		}
-		return tx.Bucket([]byte("messages")).SetSequence(sequence)
+		return tx.Bucket(a.bucketName("messages")).SetSequence(sequence)
 	})
 	if err != nil {
 		fail(w, 500, "清空失败，请重试")
@@ -510,7 +574,7 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) {
 			next.Paused = false
 		}
 	}
-	if e := a.db.Update(func(tx *bolt.Tx) error { return saveSettings(tx, next) }); e != nil {
+	if e := a.db.Update(func(tx *bolt.Tx) error { return a.saveSettings(tx, next) }); e != nil {
 		fail(w, 500, "设置保存失败")
 		return
 	}
@@ -583,7 +647,7 @@ func (a *App) events(w http.ResponseWriter, r *http.Request, admin bool) {
 		}
 	}
 }
-func (a *App) routes() http.Handler {
+func (a *App) roomRoutes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, r *http.Request) {
@@ -632,7 +696,7 @@ func (a *App) routes() http.Handler {
 			fail(w, 404, "接口不存在")
 			return
 		}
-		if r.URL.Path == "/" || r.URL.Path == "/screen" || r.URL.Path == "/join" || r.URL.Path == "/teacher" {
+		if r.URL.Path == "/" || classroomPage.MatchString(r.URL.Path) {
 			raw, e := fs.ReadFile(web, "index.html")
 			if e != nil {
 				http.Error(w, "请先运行 npm run build", 500)
@@ -647,7 +711,7 @@ func (a *App) routes() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "same-origin")
-		if r.URL.Path == "/join" {
+		if match := classroomPage.FindStringSubmatch(r.URL.Path); match != nil && match[1] == "join" {
 			ancestors := a.studentFrameAncestors
 			if ancestors == "" {
 				ancestors = "'self'"

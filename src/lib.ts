@@ -1,5 +1,15 @@
 import { useEffect, useState } from 'react'
 
+const route = location.pathname.match(/^\/(screen|join|teacher)([1-9][0-9]{0,2})?\/?$/)
+export const roomID = route?.[2] || '1'
+export const currentPage = route?.[1] || 'screen'
+export function pageURL(page: string) { return `/${page}${roomID === '1' ? '' : roomID}` }
+export function roomAPI(path: string) {
+  const url = new URL(path, location.origin)
+  url.searchParams.set('room', roomID)
+  return url.pathname + url.search
+}
+
 export const fields = ['医疗', '交通', '能源', '农业', '人工智能', '芯片', '航空航天', '其他'] as const
 export type Message = { id: number; content: string; category: string; nickname: string; status: 'approved' | 'pending'; createdAt: number }
 export type Settings = { roomName: string; paused: boolean; moderation: boolean; mode: 'live' | 'finale'; finaleAt: number }
@@ -8,7 +18,7 @@ export type Snapshot = { messages: Message[]; settings: Settings; stats: Stats; 
 export const emptyState: Snapshot = { messages: [], settings: { roomName: '未来科技课堂', paused: false, moderation: false, mode: 'live', finaleAt: 0 }, stats: { total: 0, approved: 0, pending: 0, participants: 0, categories: {} }, joinURLs: [] }
 export class ApiError extends Error { status: number; constructor(message: string, status: number) { super(message); this.status = status } }
 export async function api<T = unknown>(url: string, method = 'GET', body?: unknown): Promise<T> {
-  const res = await fetch(url, { method, credentials: 'same-origin', headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined })
+  const res = await fetch(roomAPI(url), { method, credentials: 'same-origin', headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new ApiError(data.error || '连接失败，请稍后重试', res.status)
   return data as T
@@ -19,7 +29,7 @@ export function useClassroom(admin = false) {
   const [ready, setReady] = useState(false)
   const [clearVersion, setClearVersion] = useState(0)
   useEffect(() => {
-    const es = new EventSource(admin ? '/api/admin/events' : '/api/events')
+    const es = new EventSource(roomAPI(admin ? '/api/admin/events' : '/api/events'))
     es.onopen = () => setConnected(true)
     es.onerror = () => setConnected(false)
     const listen = (event: string, fn: (data: any) => void) => es.addEventListener(event, e => { try { fn(JSON.parse((e as MessageEvent).data)) } catch { /* Reconnection replaces any incomplete event. */ } })
