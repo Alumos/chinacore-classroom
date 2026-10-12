@@ -85,3 +85,15 @@
 @media(max-width:700px){.stage-bottom>span{display:none}.stage-bottom-actions{gap:6px;justify-content:flex-end;width:100%}.stage-preview{font-size:12px;min-height:40px;padding:8px 12px}.stage-bottom-actions .icon-button span{display:none}}
 /* Remove page padding/margins from the projection viewport so its bottom is never cropped. */
 .stage.stage-full{position:fixed;inset:0;z-index:10;width:100vw;height:100dvh;margin:0}
+
+/* Red-and-gold classroom stage with cream comment stickers. */
+.stage{border-color:#dca15b66;background:radial-gradient(ellipse at 50% 45%,#752238 0%,#381521 55%,#200f19 100%);box-shadow:0 12px 50px #21071330,inset 0 0 60px #240c16}
+.stage-grid{background-image:linear-gradient(#ffd99b09 1px,transparent 1px),linear-gradient(90deg,#ffd99b09 1px,transparent 1px)}
+.stage:before{background:radial-gradient(circle,#efb96518,transparent 65%)}
+.stage:after{background:linear-gradient(90deg,transparent,#f1c37b33,transparent)}
+.stage-orbit{border-color:#efc17722}.orbit-three{border-color:#efc17715}
+.stage .chip-core{background:linear-gradient(145deg,#852e3bd1,#371623);border-color:#e7bf7977;box-shadow:0 0 0 7px #a64d3522,0 0 0 8px #e4b06a24,0 20px 70px #d3563420}
+.stage .chip-core span{color:#ffe2a3}.stage .chip-core small{color:#d0a88e}
+.stage-top,.stage-bottom,.stage-caption{color:#ebcba9}.stage-empty{color:#f2d9bb}
+.stage-bottom .icon-button,.stage-preview{background:#451b29;border-color:#e5b97455;color:#ffe1a7}
+.stage-finale{background:radial-gradient(ellipse at 50% 50%,#592133,#200f19 70%)}

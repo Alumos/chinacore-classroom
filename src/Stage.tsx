@@ -3,9 +3,10 @@ import { Maximize2, Minimize2, Sparkles, WandSparkles, Volume2, VolumeX } from '
 import type { Message } from './lib'
 import { FinaleMusic } from './finaleMusic'
 import { stageLayout, freeLane } from './stageLayout'
+import { bulletSticker, stickerNames, fieldEmoji } from './bulletArt'
 
-const colors: Record<string, string> = { '医疗': '#97d9ee', '交通': '#a0baf7', '能源': '#e9c183', '农业': '#a7dac0', '人工智能': '#c1a6f5', '芯片': '#f2d295', '航空航天': '#a0c7ed', '其他': '#ced8e8' }
-type Bullet = { id: number; text: string; color: string; x: number; y: number; width: number; row: number; alpha: number }
+const themes = [{ fill: '#a71930', border: '#edbd70', ink: '#fff5d9' }, { fill: '#fff5df', border: '#efc477', ink: '#8b1830' }, { fill: '#7d1830', border: '#e5a85f', ink: '#ffe8b5' }, { fill: '#fff9ed', border: '#d9b56d', ink: '#852c3f' }, { fill: '#b33226', border: '#ffcd80', ink: '#fff7df' }, { fill: '#662239', border: '#efc67b', ink: '#ffe5ac' }, { fill: '#ffe5dc', border: '#eaa58e', ink: '#912640' }, { fill: '#f8eed3', border: '#dec382', ink: '#70402e' }]
+type Bullet = { id: number; text: string; theme: number; x: number; y: number; width: number; row: number; alpha: number }
 type Particle = { x: number; y: number; sx: number; sy: number; tx: number; ty: number; size: number; phase: number; glow: HTMLCanvasElement[] }
 
 export default function Stage({ messages, finaleAt, full, toggleFull, demo, previewing, togglePreview }: { messages: Message[]; finaleAt: number; full: boolean; toggleFull: () => void; demo: boolean; previewing: boolean; togglePreview: () => void }) {
@@ -34,6 +35,7 @@ export default function Stage({ messages, finaleAt, full, toggleFull, demo, prev
   current.current = { messages, finaleAt }
   useEffect(() => {
     const canvas = canvasRef.current!; const ctx = canvas.getContext('2d')!
+    const stickers = stickerNames.map((_, i) => bulletSticker(i))
     let dpr = 1, width = 0, height = 0, frame = 0, lastTime = 0, lastSpawn = 0, cursor = 0, previousFinale = 0
     let bullets: Bullet[] = [], particles: Particle[] = [], seen = new Set<number>(), queue: Message[] = []
     let previousMessages: Message[] | null = null
@@ -99,7 +101,7 @@ export default function Stage({ messages, finaleAt, full, toggleFull, demo, prev
       frame = requestAnimationFrame(draw)
       const delta = lastTime ? Math.min((now - lastTime) / 1000, .06) : 0; lastTime = now
       ctx.clearRect(0, 0, width, height)
-      for (const star of stars) { ctx.globalAlpha = .2 + .3 * (Math.sin(now / 2100 + star.phase) + 1) / 2; ctx.fillStyle = '#b9ccec'; ctx.beginPath(); ctx.arc(star.x, star.y, star.r, 0, Math.PI * 2); ctx.fill() }
+      for (const star of stars) { ctx.globalAlpha = .2 + .3 * (Math.sin(now / 2100 + star.phase) + 1) / 2; ctx.fillStyle = '#f5d49b'; ctx.beginPath(); ctx.arc(star.x, star.y, star.r, 0, Math.PI * 2); ctx.fill() }
       ctx.globalAlpha = 1
       const { messages: currentMessages, finaleAt: start } = current.current
       if (currentMessages !== previousMessages) {
@@ -113,7 +115,7 @@ export default function Stage({ messages, finaleAt, full, toggleFull, demo, prev
       if (!start && now - lastSpawn > 950 && currentMessages.length) {
         const fontSize = layout.fontSize; ctx.font = `600 ${fontSize}px "Microsoft YaHei", sans-serif`
         const row = freeLane(bullets, layout.rows, width, layout.gap, nextRow)
-        if (row >= 0) { const m = queue.shift() || currentMessages[cursor++ % currentMessages.length]; const text = `${m.content}`; const textWidth = ctx.measureText(text).width + layout.padding; nextRow = (row + 1) % layout.rows; bullets.push({ id: m.id, text, color: colors[m.category] || '#cdd9ed', x: width + 20, y: layout.rowY(row), width: textWidth, row, alpha: 1 }); lastSpawn = now }
+        if (row >= 0) { const m = queue.shift() || currentMessages[cursor++ % currentMessages.length]; const text = `${fieldEmoji[m.category] || fieldEmoji['其他']}  ${m.content}`; const textWidth = ctx.measureText(text).width + layout.padding; nextRow = (row + 1) % layout.rows; bullets.push({ id: m.id, text, theme: Math.abs(m.id) % themes.length, x: width + 20, y: layout.rowY(row), width: textWidth, row, alpha: 1 }); lastSpawn = now }
       }
       if (start !== previousFinale) { previousFinale = start; if (start) { prepareFinale() } else { particles = []; bullets = []; nextRow = 0 } }
       const elapsed = start ? Math.max(0, (Date.now() - start) / 1000) : 0
@@ -122,7 +124,11 @@ export default function Stage({ messages, finaleAt, full, toggleFull, demo, prev
         if (start && elapsed >= 2.7) break
         b.x -= layout.speed * delta; ctx.globalAlpha = start ? Math.max(0, 1 - elapsed / 2.7) : .94
         const bw = b.width, bh = layout.bubbleHeight, top = b.y - bh / 2
-        ctx.fillStyle = 'rgba(19, 33, 56, .85)'; ctx.strokeStyle = 'rgba(141, 173, 218, .28)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.roundRect(b.x, top, bw, bh, bh / 2); ctx.fill(); ctx.stroke(); ctx.fillStyle = b.color; ctx.beginPath(); ctx.arc(b.x + layout.fontSize * .8, b.y, layout.fontSize * .14, 0, Math.PI * 2); ctx.fill(); ctx.fillText(b.text, b.x + layout.fontSize * 1.5, b.y)
+        const theme = themes[b.theme], stickerSize = bh - 8
+        ctx.fillStyle = theme.fill; ctx.strokeStyle = theme.border; ctx.lineWidth = 1.5
+        ctx.beginPath(); ctx.roundRect(b.x, top, bw, bh, bh / 2); ctx.fill(); ctx.stroke()
+        ctx.drawImage(stickers[b.theme], b.x + 4, top + 4, stickerSize, stickerSize)
+        ctx.fillStyle = theme.ink; ctx.fillText(b.text, b.x + bh + layout.fontSize * .25, b.y)
       }
       bullets = bullets.filter(b => b.x + b.width > -20); ctx.globalAlpha = 1
       if (start) {

@@ -9,7 +9,7 @@ export function stageLayout(width: number, height: number, safeTop = 0, safeBott
     fontSize, bubbleHeight, rows,
     rowY: (row: number) => top + (row + .5) * availableHeight / rows,
     speed: Math.max(80, width / 13), gap: Math.max(48, fontSize * 2.5),
-    padding: fontSize * 2.8,
+    padding: fontSize * 3.2,
     titleSize: Math.min(width / 7.5, height / 3.3),
     subtitleSize: Math.max(14, Math.min(56, width / 55)),
     particleScale: Math.max(1, Math.min(3, width / 1280)),
