@@ -66,3 +66,5 @@
   .route-join .field-choice{min-height:72px}
   .route-join .student-footer{display:none}
 }
+
+.stage-bottom-actions{display:flex;align-items:center;gap:10px}.stage-bottom-actions .icon-button{display:inline-flex;align-items:center;gap:6px;width:auto;padding:7px}.stage-bottom-actions .icon-button span{font-size:11px;white-space:nowrap}.stage-bottom-actions [aria-pressed="true"]{color:var(--gold)}
