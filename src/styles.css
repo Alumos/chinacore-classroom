@@ -15,7 +15,7 @@
 
 /* Classroom laptops: keep the student form and submit button in one view. */
 @media(min-width:1101px){
-  .route-join>.header{height:56px;padding:0 28px}
+  .route-join>.header{height:auto;padding:12px 28px}
   .route-join .brand-icon{width:36px;height:36px}
   .route-join .brand small{display:none}
   .route-join .student-page{width:100%;max-width:1600px;padding:14px 28px 0}
