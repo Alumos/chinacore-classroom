@@ -20,7 +20,6 @@ function disc(c: CanvasRenderingContext2D, x: number, y: number, r: number, colo
   c.fillStyle = color; c.beginPath(); c.arc(x,y,r,0,Math.PI*2); c.fill()
 }
 export const stickerNames = ['五星红旗', '红领巾少年', '中国航天员', '国宝熊猫', '逐梦火箭', '中国芯', '红领巾女孩', '和平白鸽']
-export const fieldEmoji: Record<string, string> = { '医疗': '🩺', '交通': '🚄', '能源': '⚡', '农业': '🌾', '人工智能': '🤖', '芯片': '💻', '航空航天': '🚀', '其他': '🌟' }
 export function bulletSticker(kind: number) {
   const tile = document.createElement('canvas'); tile.width = tile.height = 192
   const c = tile.getContext('2d')!; c.scale(3, 3)

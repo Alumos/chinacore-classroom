@@ -20,12 +20,12 @@ function Toggle({ label, description, checked, onChange, disabled }: { label: st
 function FilingFooter() { return <footer className="filing-footer"><a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">苏ICP备2021038338号-1</a></footer> }
 function Brand() { return <a className="brand" href={pageURL('screen')}><span className="brand-icon"><Cpu size={25} strokeWidth={1.5} /></span><span><strong>中国芯<span className="brand-dot">·</span>强国梦</strong><small>自主可控主题课堂</small></span></a> }
 function Header({ page, state, connected }: { page: string; state: Snapshot; connected: boolean }) {
-  return <header className="header"><Brand /><nav aria-label="主导航">{[['screen', '互动大屏', Monitor], ['join', '学生入口', GraduationCap], ['teacher', '教师工作台', ShieldCheck]].map(([route, label, Icon]) => { const I = Icon as typeof Monitor; return <a key={route as string} className={page === route ? 'active' : ''} href={pageURL(route as string)}><I size={16} />{label as string}</a> })}</nav><div className="header-session"><span className={`connection ${connected ? '' : 'disconnected'}`}><i />{connected ? '实时连接' : '连接中'}</span><span className="header-room">课堂 {roomID} · {state.settings.roomName}</span></div></header>
+  return <header className="header"><Brand /><nav className="classroom-navigation" aria-label="课堂入口">{[['screen', '互动大屏', Monitor], ['join', '学生入口', GraduationCap], ['teacher', '教师工作台', ShieldCheck]].map(([route, label, Icon]) => { const I = Icon as typeof Monitor; return <a key={route as string} className={`nav-${route} ${page === route ? 'active' : ''}`} aria-current={page === route ? 'page' : undefined} href={pageURL(route as string)}><I size={16} />{label as string}</a> })}</nav><div className="header-session"><span className={`connection ${connected ? '' : 'disconnected'}`}><i />{connected ? '实时连接' : '连接中'}</span><span className="header-room">课堂 {roomID} · {state.settings.roomName}</span></div></header>
 }
 function JoinCard({ state, notify, compact = false }: { state: Snapshot; notify: Notify; compact?: boolean }) {
   const directURL = `${location.origin}${pageURL('join')}`
   const isLocal = ['localhost', '127.0.0.1', '::1'].includes(location.hostname)
-  const options = isLocal ? state.joinURLs : [directURL]
+  const options = isLocal ? state.joinURLs.map(raw => { const url = new URL(raw); url.pathname = pageURL('join'); return url.toString() }) : [directURL]
   const [chosen, setChosen] = useState('')
   const url = options.includes(chosen) ? chosen : (options[0] || directURL)
   const copy = async () => { try { if (!navigator.clipboard) throw new Error(); await navigator.clipboard.writeText(url); notify('学生入口已复制') } catch { notify('此浏览器不支持复制，请选中下方链接复制', true) } }

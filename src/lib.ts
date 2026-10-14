@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 const route = location.pathname.match(/^\/(screen|join|teacher)([1-9][0-9]{0,2})?\/?$/)
 export const roomID = route?.[2] || '1'
 export const currentPage = route?.[1] || 'screen'
-export function pageURL(page: string) { return `/${page}${roomID === '1' ? '' : roomID}` }
+export function pageURL(page: string) { return `/${page}${route?.[2] || ''}` }
 export function roomAPI(path: string) {
   const url = new URL(path, location.origin)
   url.searchParams.set('room', roomID)

@@ -97,3 +97,14 @@
 .stage-top,.stage-bottom,.stage-caption{color:#ebcba9}.stage-empty{color:#f2d9bb}
 .stage-bottom .icon-button,.stage-preview{background:#451b29;border-color:#e5b97455;color:#ffe1a7}
 .stage-finale{background:radial-gradient(ellipse at 50% 50%,#592133,#200f19 70%)}
+
+/* Separate student and teacher destinations, including on narrow screens. */
+.header{height:auto;min-height:88px;flex-wrap:wrap;padding-top:16px;padding-bottom:12px;row-gap:12px}
+.header .classroom-navigation{order:3;flex:0 0 100%;width:100%;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px;border-top:1px solid var(--line);padding-top:10px}
+.header .classroom-navigation a{font-size:13px;min-height:44px;gap:8px;padding:10px 14px;white-space:nowrap}
+.classroom-navigation .nav-screen{justify-self:start}
+.classroom-navigation .nav-join{justify-self:center}
+.classroom-navigation .nav-teacher{justify-self:end}
+@media(max-width:700px){.header .classroom-navigation{gap:8px}.header .classroom-navigation a{font-size:11px;padding:9px 6px;gap:5px}.header .classroom-navigation svg{width:15px;height:15px}}
+/* Older browsers that do not understand dvh still get a full-height stage. */
+.stage.stage-full{height:100vh;height:100dvh}

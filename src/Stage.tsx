@@ -3,7 +3,7 @@ import { Maximize2, Minimize2, Sparkles, WandSparkles, Volume2, VolumeX } from '
 import type { Message } from './lib'
 import { FinaleMusic } from './finaleMusic'
 import { stageLayout, freeLane } from './stageLayout'
-import { bulletSticker, stickerNames, fieldEmoji } from './bulletArt'
+import { bulletSticker, stickerNames } from './bulletArt'
 
 const themes = [{ fill: '#a71930', border: '#edbd70', ink: '#fff5d9' }, { fill: '#fff5df', border: '#efc477', ink: '#8b1830' }, { fill: '#7d1830', border: '#e5a85f', ink: '#ffe8b5' }, { fill: '#fff9ed', border: '#d9b56d', ink: '#852c3f' }, { fill: '#b33226', border: '#ffcd80', ink: '#fff7df' }, { fill: '#662239', border: '#efc67b', ink: '#ffe5ac' }, { fill: '#ffe5dc', border: '#eaa58e', ink: '#912640' }, { fill: '#f8eed3', border: '#dec382', ink: '#70402e' }]
 type Bullet = { id: number; text: string; theme: number; x: number; y: number; width: number; row: number; alpha: number }
@@ -115,7 +115,7 @@ export default function Stage({ messages, finaleAt, full, toggleFull, demo, prev
       if (!start && now - lastSpawn > 950 && currentMessages.length) {
         const fontSize = layout.fontSize; ctx.font = `600 ${fontSize}px "Microsoft YaHei", sans-serif`
         const row = freeLane(bullets, layout.rows, width, layout.gap, nextRow)
-        if (row >= 0) { const m = queue.shift() || currentMessages[cursor++ % currentMessages.length]; const text = `${fieldEmoji[m.category] || fieldEmoji['其他']}  ${m.content}`; const textWidth = ctx.measureText(text).width + layout.padding; nextRow = (row + 1) % layout.rows; bullets.push({ id: m.id, text, theme: Math.abs(m.id) % themes.length, x: width + 20, y: layout.rowY(row), width: textWidth, row, alpha: 1 }); lastSpawn = now }
+        if (row >= 0) { const m = queue.shift() || currentMessages[cursor++ % currentMessages.length]; const text = m.content; const textWidth = ctx.measureText(text).width + layout.padding; nextRow = (row + 1) % layout.rows; bullets.push({ id: m.id, text, theme: Math.abs(m.id) % themes.length, x: width + 20, y: layout.rowY(row), width: textWidth, row, alpha: 1 }); lastSpawn = now }
       }
       if (start !== previousFinale) { previousFinale = start; if (start) { prepareFinale() } else { particles = []; bullets = []; nextRow = 0 } }
       const elapsed = start ? Math.max(0, (Date.now() - start) / 1000) : 0
@@ -126,7 +126,12 @@ export default function Stage({ messages, finaleAt, full, toggleFull, demo, prev
         const bw = b.width, bh = layout.bubbleHeight, top = b.y - bh / 2
         const theme = themes[b.theme], stickerSize = bh - 8
         ctx.fillStyle = theme.fill; ctx.strokeStyle = theme.border; ctx.lineWidth = 1.5
-        ctx.beginPath(); ctx.roundRect(b.x, top, bw, bh, bh / 2); ctx.fill(); ctx.stroke()
+        ctx.beginPath()
+        // Rounded capsule using long-supported Canvas primitives (avoids requiring roundRect).
+        const radius = bh / 2
+        ctx.moveTo(b.x + radius, top); ctx.lineTo(b.x + bw - radius, top)
+        ctx.arc(b.x + bw - radius, b.y, radius, -Math.PI / 2, Math.PI / 2)
+        ctx.lineTo(b.x + radius, top + bh); ctx.arc(b.x + radius, b.y, radius, Math.PI / 2, Math.PI * 1.5); ctx.closePath(); ctx.fill(); ctx.stroke()
         ctx.drawImage(stickers[b.theme], b.x + 4, top + 4, stickerSize, stickerSize)
         ctx.fillStyle = theme.ink; ctx.fillText(b.text, b.x + bh + layout.fontSize * .25, b.y)
       }
